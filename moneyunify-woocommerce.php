@@ -1,9 +1,9 @@
 <?php
 /**
- * Plugin Name: MoneyUnify WooCommerce Gateway
- * Description: WooCommerce payment gateway for MoneyUnify. Order completes ONLY after customer approves payment on phone.
- * Version: 1.4.0
- * Author: Kazashim Kuzasuwat
+ * Plugin Name: MoneyUnify WooCommerce Gateway (ZMW – Approval Required)
+ * Description: WooCommerce payment gateway for MoneyUnify. Only completes order after customer approves payment on phone. Shows properly in WooCommerce payment methods.
+ * Version: 1.5.0
+ * Author: Kazashim kuzasuwat
  */
 
 if (!defined('ABSPATH')) exit;
@@ -16,142 +16,158 @@ add_filter('woocommerce_payment_gateways', function ($gateways) {
     return $gateways;
 });
 
+/*--------------------------------------------------------------
+ LOAD GATEWAY AFTER WOOCOMMERCE IS READY
+--------------------------------------------------------------*/
 add_action('plugins_loaded', function () {
 
-class WC_Gateway_MoneyUnify extends WC_Payment_Gateway {
-
-    public function __construct() {
-        $this->id = 'moneyunify';
-        $this->method_title = 'MoneyUnify';
-        $this->method_description = 'Pay using MoneyUnify Mobile Money';
-        $this->has_fields = true;
-
-        $this->init_form_fields();
-        $this->init_settings();
-
-        $this->title   = $this->get_option('title');
-        $this->auth_id = $this->get_option('auth_id');
-        $this->sandbox = $this->get_option('sandbox') === 'yes';
-
-        add_action(
-            'woocommerce_update_options_payment_gateways_' . $this->id,
-            [$this, 'process_admin_options']
-        );
+    if (!class_exists('WC_Payment_Gateway')) {
+        return;
     }
 
-    /*--------------------------------------------------------------
-    SETTINGS
-    --------------------------------------------------------------*/
-    public function init_form_fields() {
-        $this->form_fields = [
-            'enabled' => [
-                'title' => 'Enable',
-                'type' => 'checkbox',
-                'default' => 'yes'
-            ],
-            'title' => [
-                'title' => 'Title',
-                'type' => 'text',
-                'default' => 'Mobile Money (MoneyUnify)'
-            ],
-            'auth_id' => [
-                'title' => 'MoneyUnify Auth ID',
-                'type' => 'text'
-            ],
-            'sandbox' => [
-                'title' => 'Sandbox Mode',
-                'type' => 'checkbox',
-                'default' => 'yes'
-            ]
-        ];
-    }
+    class WC_Gateway_MoneyUnify extends WC_Payment_Gateway {
 
-    /*--------------------------------------------------------------
-    INLINE CHECKOUT UI
-    --------------------------------------------------------------*/
-    public function payment_fields() {
-        ?>
-        <div id="moneyunify-inline">
-            <p><strong>Enter Mobile Money Number</strong></p>
-            <input type="text" name="moneyunify_phone" placeholder="097XXXXXXX" required />
-            <small>You will be prompted on your phone to approve payment.</small>
-        </div>
-        <?php
-    }
+        public function __construct() {
+            $this->id = 'moneyunify';
+            $this->method_title = 'MoneyUnify';
+            $this->method_description = 'Pay using MoneyUnify Mobile Money. Order completes ONLY after customer approval.';
+            $this->has_fields = true;
 
-    /*--------------------------------------------------------------
-    PROCESS PAYMENT
-    --------------------------------------------------------------*/
-    public function process_payment($order_id) {
-        $order = wc_get_order($order_id);
+            $this->init_form_fields();
+            $this->init_settings();
 
-        // Currency lock
-        if (get_woocommerce_currency() !== 'ZMW') {
-            wc_add_notice('MoneyUnify supports ZMW currency only.', 'error');
-            return;
+            $this->title   = $this->get_option('title');
+            $this->auth_id = $this->get_option('auth_id');
+            $this->sandbox = $this->get_option('sandbox') === 'yes';
+
+            add_action(
+                'woocommerce_update_options_payment_gateways_' . $this->id,
+                [$this, 'process_admin_options']
+            );
         }
 
-        $phone = sanitize_text_field($_POST['moneyunify_phone'] ?? '');
-
-        if (!preg_match('/^[0-9]{9,12}$/', $phone)) {
-            wc_add_notice('Invalid mobile money number.', 'error');
-            return;
+        /*--------------------------------------------------------------
+        SETTINGS
+        --------------------------------------------------------------*/
+        public function init_form_fields() {
+            $this->form_fields = [
+                'enabled' => [
+                    'title' => 'Enable',
+                    'type' => 'checkbox',
+                    'default' => 'yes'
+                ],
+                'title' => [
+                    'title' => 'Title',
+                    'type' => 'text',
+                    'default' => 'Mobile Money (MoneyUnify)'
+                ],
+                'auth_id' => [
+                    'title' => 'MoneyUnify Auth ID',
+                    'type' => 'text'
+                ],
+                'sandbox' => [
+                    'title' => 'Sandbox Mode',
+                    'type' => 'checkbox',
+                    'default' => 'yes'
+                ]
+            ];
         }
 
-        // Request payment (STK push)
-        $response = $this->api_call('/payments/request', [
-            'auth_id'    => $this->auth_id,
-            'from_payer' => $phone,
-            'amount'     => $order->get_total(),
-            'currency'   => 'ZMW'
-        ]);
+        /*--------------------------------------------------------------
+        CHECK IF GATEWAY IS AVAILABLE
+        --------------------------------------------------------------*/
+        public function is_available() {
 
-        if (empty($response['data']['transaction_id'])) {
-            wc_add_notice('Payment request failed. Please try again.', 'error');
-            return;
+            if ($this->enabled !== 'yes') return false;
+            if (get_woocommerce_currency() !== 'ZMW') return false;
+            if (empty($this->auth_id)) return false;
+
+            return true;
         }
 
-        update_post_meta($order_id, '_moneyunify_txn', $response['data']['transaction_id']);
-        update_post_meta($order_id, '_moneyunify_phone', $phone);
+        /*--------------------------------------------------------------
+        INLINE CHECKOUT UI
+        --------------------------------------------------------------*/
+        public function payment_fields() {
+            ?>
+            <div id="moneyunify-inline">
+                <p><strong>Enter Mobile Money Number</strong></p>
+                <input type="text" name="moneyunify_phone" placeholder="097XXXXXXX" required />
+                <small>You will receive a prompt on your phone to approve payment.</small>
+            </div>
+            <?php
+        }
 
-        // IMPORTANT: order stays ON-HOLD until approval
-        $order->update_status('on-hold', 'Awaiting customer approval on phone (MoneyUnify)');
-        wc_reduce_stock_levels($order_id);
-        WC()->cart->empty_cart();
+        /*--------------------------------------------------------------
+        PROCESS PAYMENT
+        --------------------------------------------------------------*/
+        public function process_payment($order_id) {
+            $order = wc_get_order($order_id);
 
-        return [
-            'result' => 'success',
-            'redirect' => $this->get_return_url($order)
-        ];
+            if (get_woocommerce_currency() !== 'ZMW') {
+                wc_add_notice('MoneyUnify only supports ZMW.', 'error');
+                return;
+            }
+
+            $phone = sanitize_text_field($_POST['moneyunify_phone'] ?? '');
+            if (!preg_match('/^[0-9]{9,12}$/', $phone)) {
+                wc_add_notice('Invalid mobile money number.', 'error');
+                return;
+            }
+
+            // Request payment
+            $response = $this->api_call('/payments/request', [
+                'auth_id'    => $this->auth_id,
+                'from_payer' => $phone,
+                'amount'     => $order->get_total(),
+                'currency'   => 'ZMW'
+            ]);
+
+            if (empty($response['data']['transaction_id'])) {
+                wc_add_notice('Payment request failed. Try again.', 'error');
+                return;
+            }
+
+            update_post_meta($order_id, '_moneyunify_txn', $response['data']['transaction_id']);
+            update_post_meta($order_id, '_moneyunify_phone', $phone);
+
+            $order->update_status('on-hold', 'Awaiting customer approval on phone (MoneyUnify)');
+            wc_reduce_stock_levels($order_id);
+            WC()->cart->empty_cart();
+
+            return [
+                'result' => 'success',
+                'redirect' => $this->get_return_url($order)
+            ];
+        }
+
+        /*--------------------------------------------------------------
+        VERIFY PAYMENT
+        --------------------------------------------------------------*/
+        public function verify_payment($txn) {
+            return $this->api_call('/payments/verify', [
+                'transaction_id' => $txn
+            ]);
+        }
+
+        /*--------------------------------------------------------------
+        API CALL
+        --------------------------------------------------------------*/
+        private function api_call($path, $body) {
+            $base = $this->sandbox
+                ? 'https://sandbox.moneyunify.one'
+                : 'https://api.moneyunify.one';
+
+            $response = wp_remote_post($base . $path, [
+                'timeout' => 30,
+                'headers' => ['Accept' => 'application/json'],
+                'body' => $body
+            ]);
+
+            if (is_wp_error($response)) return null;
+            return json_decode(wp_remote_retrieve_body($response), true);
+        }
     }
-
-    /*--------------------------------------------------------------
-    VERIFY PAYMENT (STRICT)
-    --------------------------------------------------------------*/
-    public function verify_payment($txn) {
-        return $this->api_call('/payments/verify', [
-            'transaction_id' => $txn
-        ]);
-    }
-
-    /*--------------------------------------------------------------
-    API CALL
-    --------------------------------------------------------------*/
-    private function api_call($path, $body) {
-        $base = $this->sandbox
-            ? 'https://sandbox.moneyunify.one'
-            : 'https://api.moneyunify.one';
-
-        $response = wp_remote_post($base . $path, [
-            'timeout' => 30,
-            'headers' => ['Accept' => 'application/json'],
-            'body' => $body
-        ]);
-
-        if (is_wp_error($response)) return null;
-        return json_decode(wp_remote_retrieve_body($response), true);
-    }
-}
 });
 
 /*--------------------------------------------------------------
@@ -180,12 +196,11 @@ function moneyunify_poll() {
         }
 
         if (in_array($status, ['FAILED', 'REJECTED', 'CANCELLED'])) {
-            $order->update_status('failed', 'Customer rejected or payment failed.');
+            $order->update_status('failed', 'Customer did not approve or payment failed.');
             wp_send_json_success(['status' => 'failed']);
         }
     }
 
-    // Still waiting for user approval
     wp_send_json_success(['status' => 'waiting']);
 }
 
