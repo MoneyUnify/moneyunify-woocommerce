@@ -1,0 +1,1 @@
+This plugin adds a WooCommerce payment gateway for MoneyUnify, allowing orders to complete only after customer approval on their phone. It includes settings for enabling the gateway, setting the title, and configuring the authentication ID and sandbox mode.
