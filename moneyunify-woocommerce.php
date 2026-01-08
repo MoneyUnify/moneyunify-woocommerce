@@ -35,6 +35,7 @@ add_action('plugins_loaded', function () {
 
             $this->title   = $this->get_option('title');
             $this->auth_id = $this->get_option('auth_id');
+            $this->currency = $this->get_option('currency', 'ZMW');
             $this->sandbox = $this->get_option('sandbox') === 'yes';
 
             add_action(
@@ -62,6 +63,24 @@ add_action('plugins_loaded', function () {
                     'title' => 'MoneyUnify Auth ID',
                     'type' => 'text'
                 ],
+                'currency' => [
+                    'title' => 'Currency',
+                    'type' => 'select',
+                    'default' => 'ZMW',
+                    'options' => [
+                        'ZMW' => 'ZMW (Zambian Kwacha)',
+                        'USD' => 'USD (US Dollar)',
+                        'NGN' => 'NGN (Nigerian Naira)',
+                        'KES' => 'KES (Kenyan Shilling)',
+                        'GHS' => 'GHS (Ghana Cedi)',
+                        'TZS' => 'TZS (Tanzanian Shilling)',
+                        'UGX' => 'UGX (Ugandan Shilling)',
+                        'XOF' => 'XOF (West African CFA)',
+                        'EUR' => 'EUR (Euro)',
+                        'GBP' => 'GBP (British Pound)',
+                    ],
+                    'description' => 'Select the currency to accept for MoneyUnify payments'
+                ],
                 'sandbox' => [
                     'title' => 'Sandbox Mode',
                     'type' => 'checkbox',
@@ -76,8 +95,8 @@ add_action('plugins_loaded', function () {
         public function is_available() {
 
             if ($this->enabled !== 'yes') return false;
-            if (get_woocommerce_currency() !== 'ZMW') return false;
             if (empty($this->auth_id)) return false;
+            if (get_woocommerce_currency() !== $this->currency) return false;
 
             return true;
         }
@@ -101,15 +120,15 @@ add_action('plugins_loaded', function () {
         public function process_payment($order_id) {
             $order = wc_get_order($order_id);
 
-            if (get_woocommerce_currency() !== 'ZMW') {
-                wc_add_notice('MoneyUnify only supports ZMW.', 'error');
-                return;
+            if (get_woocommerce_currency() !== $this->currency) {
+                wc_add_notice('MoneyUnify only supports ' . $this->currency . '.', 'error');
+                return ['result' => 'fail', 'redirect' => ''];
             }
 
             $phone = sanitize_text_field($_POST['moneyunify_phone'] ?? '');
             if (!preg_match('/^[0-9]{9,12}$/', $phone)) {
                 wc_add_notice('Invalid mobile money number.', 'error');
-                return;
+                return ['result' => 'fail', 'redirect' => ''];
             }
 
             // Request payment
@@ -117,12 +136,12 @@ add_action('plugins_loaded', function () {
                 'auth_id'    => $this->auth_id,
                 'from_payer' => $phone,
                 'amount'     => $order->get_total(),
-                'currency'   => 'ZMW'
+                'currency'   => $this->currency
             ]);
 
             if (empty($response['data']['transaction_id'])) {
                 wc_add_notice('Payment request failed. Try again.', 'error');
-                return;
+                return ['result' => 'fail', 'redirect' => ''];
             }
 
             update_post_meta($order_id, '_moneyunify_txn', $response['data']['transaction_id']);
