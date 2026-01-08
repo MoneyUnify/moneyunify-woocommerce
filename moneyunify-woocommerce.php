@@ -1,9 +1,8 @@
 <?php
 /**
  * Plugin Name: MoneyUnify WooCommerce Gateway (ZMW – Approval Required)
- * Description: WooCommerce payment gateway for MoneyUnify. Only completes order after customer approves payment on phone. Shows properly in WooCommerce payment methods.
- * Version: 1.5.0
- * Author: Kazashim kuzasuwat
+ * Description: WooCommerce payment gateway for MoneyUnify. Only completes order after customer approves payment on phone. Shows properly in checkout.
+ * Version: 1.6.0
  */
 
 if (!defined('ABSPATH')) exit;
@@ -21,16 +20,14 @@ add_filter('woocommerce_payment_gateways', function ($gateways) {
 --------------------------------------------------------------*/
 add_action('plugins_loaded', function () {
 
-    if (!class_exists('WC_Payment_Gateway')) {
-        return;
-    }
+    if (!class_exists('WC_Payment_Gateway')) return;
 
     class WC_Gateway_MoneyUnify extends WC_Payment_Gateway {
 
         public function __construct() {
             $this->id = 'moneyunify';
             $this->method_title = 'MoneyUnify';
-            $this->method_description = 'Pay using MoneyUnify Mobile Money. Order completes ONLY after customer approval.';
+            $this->method_description = 'Pay using MoneyUnify Mobile Money. Only completes order after customer approval.';
             $this->has_fields = true;
 
             $this->init_form_fields();
